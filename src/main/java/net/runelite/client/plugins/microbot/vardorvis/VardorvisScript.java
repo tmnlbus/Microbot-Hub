@@ -10,7 +10,7 @@ import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.grounditem.LootingParameters;
 import net.runelite.client.plugins.microbot.util.grounditem.Rs2GroundItem;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
-import net.runelite.client.plugins.microbot.util.inventory.Rs2Item;
+import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
 import net.runelite.client.plugins.microbot.util.npc.Rs2Npc;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
@@ -198,8 +198,8 @@ public class VardorvisScript extends Script {
             case MOVE_ITEMS:
                 Microbot.log("Current state BANK MOVE_ITEMS");
                 if (Rs2Bank.isOpen()) Rs2Bank.closeBank();
-                Rs2Item ring = Rs2Inventory.get("Ring of shadows");
-                Rs2Item bankTab = Rs2Inventory.get("Teleport to house");
+                Rs2ItemModel ring = Rs2Inventory.get("Ring of shadows");
+                Rs2ItemModel bankTab = Rs2Inventory.get("Teleport to house");
                 Rs2Inventory.moveItemToSlot(ring, 26);
                 sleepUntil(() -> Rs2Inventory.getItemInSlot(26) != null
                         && Objects.equals(Rs2Inventory.getItemInSlot(26).name, "Ring of shadows"));
