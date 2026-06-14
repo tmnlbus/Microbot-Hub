@@ -43,17 +43,21 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
- * BarrowsScript v2.0.11-debug
+ * BarrowsScript v2.0.12
  * Fix 1: inTunnels Y-check now preserves true when player is on plane=3
  *         (prevents next-tick override clearing inTunnels during mound→tunnel transition).
  * Fix 2: outOfSupplies() at top of loop is now guarded by !inTunnels so a low-supply
  *         check can never fire a Ferox teleport the moment we enter the tunnels.
+ * Fix 3: inTunnels declared volatile for correct cross-thread visibility.
+ *         Without volatile the JVM may cache the field per-thread; BarrowsScript-2
+ *         was reading stale false on the tick after BarrowsScript-1 wrote true inside
+ *         dialogueEnterTunnels(), which caused the immediate bank trip seen in logs.
  */
 public class BarrowsScript extends Script {
 
-    public static final String VERSION = "2.0.11-debug";
+    public static final String VERSION = "2.0.12";
 
-    public static boolean inTunnels = false;
+    public static volatile boolean inTunnels = false;
     public static boolean outOfPoweredStaffCharges = false;
     public static boolean usingPoweredStaffs = false;
     public static boolean firstRun = false;
@@ -760,7 +764,7 @@ public class BarrowsScript extends Script {
     }
 
     // -------------------------------------------------------------------------
-    // All other methods — unchanged from 2.0.10-debug
+    // All other methods — unchanged from 2.0.11-debug
     // -------------------------------------------------------------------------
 
     public void checkForWorldMap() {
