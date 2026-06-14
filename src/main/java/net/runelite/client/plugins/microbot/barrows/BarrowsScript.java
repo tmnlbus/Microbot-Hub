@@ -43,13 +43,15 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
- * BarrowsScript v2.0.10-debug
- * Debug build: verbose dialogue instrumentation added throughout.
- * All [DEBUG] log lines can be removed once the dialogue issue is identified.
+ * BarrowsScript v2.0.11-debug
+ * Fix 1: inTunnels Y-check now preserves true when player is on plane=3
+ *         (prevents next-tick override clearing inTunnels during mound→tunnel transition).
+ * Fix 2: outOfSupplies() at top of loop is now guarded by !inTunnels so a low-supply
+ *         check can never fire a Ferox teleport the moment we enter the tunnels.
  */
 public class BarrowsScript extends Script {
 
-    public static final String VERSION = "2.0.10-debug";
+    public static final String VERSION = "2.0.11-debug";
 
     public static boolean inTunnels = false;
     public static boolean outOfPoweredStaffCharges = false;
@@ -147,8 +149,17 @@ public class BarrowsScript extends Script {
 
                 if (barrowsPieces.isEmpty()) barrowsPieces.add("Nothing yet.");
 
+                // FIX 1: Don't clear inTunnels while player is still on plane=3 (mid-transition).
+                // Previously this block unconditionally set inTunnels=false whenever Y was outside
+                // 9600-9730, which happened on the very next tick after dialogueEnterTunnels() set
+                // inTunnels=true because the player was still physically inside the mound (plane=3)
+                // and hadn't walked into the tunnel Y-range yet.
                 if (Rs2Player.getWorldLocation().getY() > 9600 && Rs2Player.getWorldLocation().getY() < 9730) {
                     inTunnels = true;
+                } else if (inTunnels && Rs2Player.getWorldLocation().getPlane() == 3) {
+                    // Still on plane=3 (inside a mound / mid-transition) — preserve inTunnels=true
+                    // so the script doesn't fall through to the bank/supply checks this tick.
+                    Microbot.log("[DEBUG] inTunnels preserved — player on plane=3 during tunnel transition.");
                 } else {
                     if (tunnelLoopCount != 0) tunnelLoopCount = 0;
                     inTunnels = false;
@@ -181,7 +192,14 @@ public class BarrowsScript extends Script {
                     }
                 }
 
-                outOfSupplies(config);
+                // FIX 2: Only run the top-level supply check when we are NOT already in the tunnels.
+                // Previously outOfSupplies() fired unconditionally here, which meant on the tick
+                // immediately after entering the tunnels it would evaluate supplies (e.g. prayer pts)
+                // and trigger a Ferox teleport before the tunnel loop even had a chance to run.
+                // The tunnel loop already calls outOfSupplies() internally, so this guard is safe.
+                if (!inTunnels) {
+                    outOfSupplies(config);
+                }
 
                 if (config.selectedToBarrowsTPMethod().getToBarrowsTPMethodItemID() == ItemID.TELEPORT_TO_HOUSE) {
                     if (!inTunnels && !shouldBank && Rs2Player.getWorldLocation().distanceTo(new WorldPoint(3573, 3296, 0)) > 60) {
@@ -742,7 +760,7 @@ public class BarrowsScript extends Script {
     }
 
     // -------------------------------------------------------------------------
-    // All other methods — unchanged from 2.0.9
+    // All other methods — unchanged from 2.0.10-debug
     // -------------------------------------------------------------------------
 
     public void checkForWorldMap() {
