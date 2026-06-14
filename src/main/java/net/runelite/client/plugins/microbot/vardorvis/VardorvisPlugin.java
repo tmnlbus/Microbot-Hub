@@ -29,6 +29,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 
 import javax.inject.Inject;
 import java.awt.*;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.*;
@@ -96,10 +97,12 @@ public class VardorvisPlugin extends Plugin {
             currentPrayer = Rs2PrayerEnum.PROTECT_RANGE;
         }
 
-        if (Rs2Inventory.getInventoryFood().isEmpty()
+        // Guard against null return from getInventoryFood on older API versions
+        List<?> food = Rs2Inventory.getInventoryFood();
+        if ((food == null || food.isEmpty())
                 && Microbot.getClient().getBoostedSkillLevel(Skill.HITPOINTS) < 30) {
             Microbot.log("Emergency teleport - low HP and no food!");
-            Rs2Inventory.interact("Teleport to house", "break");
+            Rs2Inventory.interact("Teleport to house", "Break");
             state = State.POH;
             sleep(4000);
         }
@@ -141,7 +144,7 @@ public class VardorvisPlugin extends Plugin {
                             && !oppositeAxe, 2400);
                     Microbot.getClientThread().invokeLater(() -> {
                         if (ok) {
-                            if (Rs2Combat.getSpecEnergy() >= 500) {
+                            if (config.useSpec() && Rs2Combat.getSpecEnergy() >= 500) {
                                 Microbot.log("Speccing after heal | tick=" + currentRunningTicks);
                                 specVardorvis();
                             } else {
@@ -188,6 +191,7 @@ public class VardorvisPlugin extends Plugin {
         if (npc.getId() != 12225) return;
         int lx = npc.getLocalLocation().getX();
         int ly = npc.getLocalLocation().getY();
+        // Local coords 8384/6080 = axe on safe tile; 8384/4800 = opposite axe
         if (lx == 8384 && ly == 6080) {
             Microbot.log("Axe on safe tile - dodging | tick=" + currentRunningTicks);
             walkingExecutor.submit(() -> Rs2Walker.walkFastCanvas(new WorldPoint(1131, 3421, 0)));
@@ -225,12 +229,12 @@ public class VardorvisPlugin extends Plugin {
     private void specVardorvis() {
         int currentSpec = Rs2Combat.getSpecEnergy();
         walkingExecutor.submit(() -> {
-            Rs2Inventory.wield(27690);
+            Rs2Inventory.wield(config.specWeaponId());
             Rs2Combat.setSpecState(true);
             sleep(50);
             Rs2Npc.interact(12223, "Attack");
             sleepUntil(() -> Rs2Combat.getSpecEnergy() != currentSpec);
-            Rs2Inventory.wield(29796);
+            Rs2Inventory.wield(config.mainWeaponId());
         });
     }
 
@@ -287,7 +291,7 @@ public class VardorvisPlugin extends Plugin {
     public void checkAxeLocations() {
         Rs2Npc.getNpcs(12227)
                 .filter(npc -> npc.getLocalLocation().getX() == 8384
-                            && npc.getLocalLocation().getY() == 5568)
+                                && npc.getLocalLocation().getY() == 5568)
                 .forEach(this::handleAxeAtLocation);
     }
 
@@ -305,16 +309,24 @@ public class VardorvisPlugin extends Plugin {
         int prayer = Microbot.getClient().getBoostedSkillLevel(Skill.PRAYER);
         if (prayer < maxPrayer - 30) Rs2Inventory.interact("prayer potion", "drink");
         if (hp < maxHealth - 45) {
-            Microbot.doInvoke(
-                    new NewMenuEntry("Eat", Rs2Inventory.slot(385), 9764864,
-                            MenuAction.CC_OP.getId(), 2, 385, "Shark"),
-                    new Rectangle(1, 1));
-            scheduler.schedule(() ->
-                    Microbot.doInvoke(
-                            new NewMenuEntry("Eat", Rs2Inventory.slot(3144), 9764864,
-                                    MenuAction.CC_OP.getId(), 2, 3144, "Cooked karambwan"),
-                            new Rectangle(1, 1)),
-                    30, TimeUnit.MILLISECONDS);
+            // Use getSlot() to find the slot index of each food item by ID
+            int sharkSlot = Rs2Inventory.getSlot(385);
+            int karambwanSlot = Rs2Inventory.getSlot(3144);
+            if (sharkSlot != -1) {
+                Microbot.doInvoke(
+                        new NewMenuEntry("Eat", sharkSlot, 9764864,
+                                MenuAction.CC_OP.getId(), 2, 385, "Shark"),
+                        new Rectangle(1, 1));
+            }
+            if (karambwanSlot != -1) {
+                int delay = Rs2Random.between(30, 60);
+                scheduler.schedule(() ->
+                        Microbot.doInvoke(
+                                new NewMenuEntry("Eat", karambwanSlot, 9764864,
+                                        MenuAction.CC_OP.getId(), 2, 3144, "Cooked karambwan"),
+                                new Rectangle(1, 1)),
+                        delay, TimeUnit.MILLISECONDS);
+            }
         }
     }
 
@@ -328,7 +340,7 @@ public class VardorvisPlugin extends Plugin {
         tickCounter = 0;
         oppositeAxeCounter = 0;
         currentRunningTicks = 0;
-        currentPrayer = Rs2PrayerEnum.RAPID_HEAL;
+        currentPrayer = null;
         axeOnSafeTile = false;
         axeOnSafeTileTick = 0;
         VardorvisScript.inFight = false;
