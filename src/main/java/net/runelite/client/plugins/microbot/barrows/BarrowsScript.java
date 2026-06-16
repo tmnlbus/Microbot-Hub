@@ -107,13 +107,16 @@ public class BarrowsScript extends Script {
 
                 if(barrowsPieces.isEmpty()) barrowsPieces.add("Nothing yet.");
 
+                // Only SET inTunnels=true from Y-coordinate; never forcibly clear it here.
+                // inTunnels is reset explicitly after chest loot or teleport out, and by
+                // the inBarrowsRegion guard. Clearing it every tick caused a race condition
+                // where the Y-coordinate had not yet updated after dialogueEnterTunnels().
                 if(Rs2Player.getWorldLocation().getY() > 9600 && Rs2Player.getWorldLocation().getY() < 9730) {
                     inTunnels = true;
-                } else {
+                } else if (!inTunnels) {
                     if(tunnelLoopCount != 0){
                         tunnelLoopCount = 0;
                     }
-                    inTunnels = false;
                 }
 
                 //powered staffs
@@ -370,6 +373,15 @@ public class BarrowsScript extends Script {
                 if(inTunnels && !shouldBank) {
                     Microbot.log("In the tunnels");
 
+                    // Prayer guard: only keep prayer active while the tunnel brother
+                    // is actually visible (hint arrow present). Deactivate otherwise
+                    // to avoid wasting prayer points navigating empty corridors.
+                    if (hintNpcModel() != null) {
+                        if (NeededPrayer != null) activatePrayer(NeededPrayer);
+                    } else {
+                        Rs2Prayer.disableAllPrayers();
+                    }
+
                     if (Rs2Player.getQuestState(Quest.HIS_FAITHFUL_SERVANTS) != QuestState.FINISHED) {
                         Microbot.showMessage("Complete the 'His Faithful Servants' quest for the webwalker to function correctly");
                         shutdown();
@@ -389,7 +401,19 @@ public class BarrowsScript extends Script {
                     gainRP(config);
                     lootChampionScroll();
 
-                    if(!Rs2Player.isMoving()) startWalkingToTheChest();
+                    // Door-proximity guard: if any openable door is within 5 tiles,
+                    // stop the background chest-walker and let solvePuzzle() handle
+                    // it first. This prevents the walker from skipping ahead and
+                    // interacting with doors further down the path out of order.
+                    boolean doorNearby = rs2TileObjectCache.query()
+                        .withName("Door").withAction("Open").nearest() != null &&
+                        rs2TileObjectCache.query().withName("Door").withAction("Open").nearest()
+                            .getWorldLocation().distanceTo(Rs2Player.getWorldLocation()) <= 5;
+                    if (doorNearby) {
+                        stopFutureWalker();
+                    } else if (!Rs2Player.isMoving()) {
+                        startWalkingToTheChest();
+                    }
 
                     solvePuzzle();
                     checkForAndFightBrother(config);
@@ -474,7 +498,8 @@ public class BarrowsScript extends Script {
 
                     if(!Rs2Bank.isOpen()){
                         stopFutureWalker();
-                        outOfSupplies(config);
+                        // outOfSupplies() removed: shouldBank is already true here;
+                        // re-evaluating mid-walk is redundant and can cause state flicker.
                         Rs2Bank.walkToBankAndUseBank(BankLocation.FEROX_ENCLAVE);
                         BreakHandlerScript.lockState.set(false);
                     } else {
