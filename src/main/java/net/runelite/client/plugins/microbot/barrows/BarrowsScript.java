@@ -845,7 +845,7 @@ public class BarrowsScript extends Script {
             // We're not in the mound yet.
             randomMoundTile = moundArea.toWorldPointList().get(Rs2Random.between(0,(totalTiles-1)));
 
-            if(Rs2Walker.walkTo(randomMoundTile))sleepUntil(()-> !Rs2Player.isMoving(), Rs2Random.between(2000,4000));
+          Rs2Walker.walkCanvas(randomMoundTile); sleepUntil(() -> !Rs2Player.isMoving(), Rs2Random.between(2000,4000));
 
             if (moundArea.contains(Rs2Player.getWorldLocation())) {
                 if(!Rs2Player.isMoving()) break;
