@@ -45,9 +45,6 @@ import java.util.concurrent.TimeUnit;
 
 public class BarrowsScript extends Script {
 
-    // FIX 1: volatile ensures all scheduled threads immediately see writes from any other thread.
-    // Without this, BarrowsScript-2 can read a stale inTunnels=false on the same tick that
-    // BarrowsScript-1 sets it to true inside dialogueEnterTunnels().
     public static volatile boolean inTunnels = false;
     public static boolean outOfPoweredStaffCharges = false;
     public static boolean usingPoweredStaffs = false;
@@ -113,12 +110,9 @@ public class BarrowsScript extends Script {
                 if(Rs2Player.getWorldLocation().getY() > 9600 && Rs2Player.getWorldLocation().getY() < 9730) {
                     inTunnels = true;
                 } else {
-
                     if(tunnelLoopCount != 0){
-                        //reset the tunnels loop counter
                         tunnelLoopCount = 0;
                     }
-
                     inTunnels = false;
                 }
 
@@ -149,10 +143,7 @@ public class BarrowsScript extends Script {
                     }
                 }
 
-                // FIX 2: Only run the supply check (and its potential bank-teleport) when we are
-                // NOT already in the tunnels. Previously this call fired on every tick including
-                // the tick immediately after dialogueEnterTunnels() set inTunnels=true, causing
-                // Thread-1 to route to the bank before the tunnel loop even started.
+                // Only check supplies when NOT in tunnels — avoids banking immediately after tunnel entry
                 if (!inTunnels) {
                     outOfSupplies(config);
                 }
@@ -163,7 +154,6 @@ public class BarrowsScript extends Script {
                             closeBank();
                             return;
                         }
-                        //needed to intercept the walker
                         if(rs2TileObjectCache.query().withId(4525).nearest() == null){
                             Rs2Inventory.interact("Teleport to house", "Inside");
                             sleepUntil(() -> Rs2Player.getAnimation() == 4069, Rs2Random.between(2000, 4000));
@@ -218,7 +208,6 @@ public class BarrowsScript extends Script {
                             }
                         }
 
-                        //resume progress from varbits
                         if(varbitCheckEnabled) {
                             if (brother.name.contains("Dharok")) {
                                 if (Microbot.getVarbitValue(Varbits.BARROWS_KILLED_DHAROK) == 1) {
@@ -258,7 +247,6 @@ public class BarrowsScript extends Script {
                             }
                         }
 
-                        //Enter mound
                         if (Rs2Player.getWorldLocation().getPlane() != 3) {
                             Microbot.log("Entering the mound");
 
@@ -281,7 +269,6 @@ public class BarrowsScript extends Script {
                                 }
                             }
 
-                            // we're in the mound, prayer is active
                             Rs2TileObjectModel sarc = rs2TileObjectCache.query().withIds(20770,20720,20722,20771,20721,20772).nearest();
                             Rs2NpcModel currentBrother = null;
                             Microbot.log("Found the Sarcophagus");
@@ -293,7 +280,6 @@ public class BarrowsScript extends Script {
                                 if (sarc.click("Search")) {
                                     sleepUntil(() -> Rs2Player.isMoving(), Rs2Random.between(1000, 3000));
                                     sleepUntil(() -> !Rs2Player.isMoving() || Rs2Player.isInCombat(), Rs2Random.between(3000, 6000));
-                                    // the brother could take a second to spawn in.
                                     sleepUntil(() -> hintNpcModel() != null || Rs2Dialogue.isInDialogue(), Rs2Random.between(750, 1500));
                                 }
 
@@ -317,9 +303,6 @@ public class BarrowsScript extends Script {
                             if(brother.name.equals(WhoisTun) && brother.name.contains("Ahrim")) {
                                 if (Rs2Dialogue.isInDialogue()) {
                                     dialogueEnterTunnels();
-                                    // FIX 4: Explicit return after entering tunnels via Ahrim mound path.
-                                    // Without this the loop falls through to the shouldBank check on the
-                                    // same tick that inTunnels was just set to true.
                                     return;
                                 }
                             }
@@ -369,7 +352,6 @@ public class BarrowsScript extends Script {
                                 if (Rs2Player.getWorldLocation().getPlane() != 3) break;
 
                                 if(!Rs2Dialogue.isInDialogue()){
-                                    //Somehow we got tun wrong.
                                     Microbot.log("We're in the wrong tunnel mound. Leaving...");
                                     this.leaveTheMound();
                                     WhoisTun = "Unknown";
@@ -379,10 +361,6 @@ public class BarrowsScript extends Script {
                             }
 
                             dialogueEnterTunnels();
-
-                            // FIX 4 (continued): Explicit return after the dedicated tunnel-entry path.
-                            // dialogueEnterTunnels() sets inTunnels=true; returning here prevents any
-                            // remaining code in this tick (including shouldBank checks) from running.
                             return;
                         }
                     }
@@ -400,13 +378,14 @@ public class BarrowsScript extends Script {
 
                     if(!varbitCheckEnabled) varbitCheckEnabled=true;
 
-
                     leaveTheMound();
                     stuckInTunsCheck();
                     solvePuzzle();
                     checkForAndFightBrother(config);
                     eatFood();
-                    outOfSupplies(config);
+                    // NOTE: outOfSupplies() is intentionally NOT called here.
+                    // Supply checking mid-tunnel caused the script to bank immediately on tunnel entry.
+                    // Supplies are checked before every mound visit and after the chest is looted.
                     gainRP(config);
                     lootChampionScroll();
 
@@ -419,10 +398,7 @@ public class BarrowsScript extends Script {
 
                     if(barrowsChest != null &&
                             (barrowsChest.getWorldLocation().distanceTo(Rs2Player.getWorldLocation()) < 5)){
-                        //chest ID: 20973
                         stopFutureWalker();
-
-
 
                         if(barrowsChest.click("Open")){
                             sleepUntil(()-> hintNpcModel()!=null && hintNpcModel().getWorldLocation().distanceTo(Rs2Player.getWorldLocation()) <= 5, Rs2Random.between(4000,6000));
@@ -450,8 +426,8 @@ public class BarrowsScript extends Script {
 
                                 io++;
                             }
-                            //we looted the chest time to reset
 
+                            // suppliesCheck is the correct place to decide banking — after chest loot
                             suppliesCheck(config);
 
                             if(shouldBank){
@@ -486,10 +462,18 @@ public class BarrowsScript extends Script {
                 }
 
                 if(shouldBank){
+                    // Safety guard: never teleport to bank while inside the barrows region.
+                    // inTunnels covers Y 9600-9730; plane==3 covers mound interiors.
+                    // A stale shouldBank=true must not pull the player out mid-run.
+                    boolean inBarrowsRegion = inTunnels || Rs2Player.getWorldLocation().getPlane() == 3;
+                    if (inBarrowsRegion) {
+                        Microbot.log("[shouldBank] Blocked: player is still in barrows region. Resetting shouldBank.");
+                        shouldBank = false;
+                        return;
+                    }
+
                     if(!Rs2Bank.isOpen()){
-                        //stop the walker
                         stopFutureWalker();
-                        //tele out
                         outOfSupplies(config);
                         Rs2Bank.walkToBankAndUseBank(BankLocation.FEROX_ENCLAVE);
                         BreakHandlerScript.lockState.set(false);
@@ -621,4 +605,24 @@ public class BarrowsScript extends Script {
                                         }
                                     } else {
                                         Microbot.log("We're out of "+ourfoodsname+" need at least "+config.targetFoodAmount()+" stopping...");
-                                        super.s
+                                        super.shutdown();
+                                    }
+                                }
+                            }
+                        }
+
+                        shouldBank = false;
+                    }
+                }
+
+                long endTime = System.currentTimeMillis();
+                long totalTime = endTime - startTime;
+                System.out.println("Total time for loop " + totalTime);
+
+            } catch (Exception ex) {
+                System.out.println(ex.getMessage());
+            }
+        }, 0, scriptDelay, TimeUnit.MILLISECONDS);
+        return true;
+    }
+
